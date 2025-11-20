@@ -1,0 +1,167 @@
+-- loot.lua (UI + TP mượt theo yêu cầu)
+
+local parent = (gethui and gethui()) or game:GetService("CoreGui")
+
+-- Xóa UI cũ
+local old = parent:FindFirstChild("Loot_UI")
+if old then old:Destroy() end
+
+-- Tạo ScreenGui
+local gui = Instance.new("ScreenGui")
+gui.Name = "Loot_UI"
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Parent = parent
+
+-- Tạo khung UI
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 300, 0, 110)
+frame.Position = UDim2.new(0, 120, 0, 120)
+frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+frame.Active = true
+frame.Draggable = true
+
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+-- Tiêu đề
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, -20, 0, 28)
+title.Position = UDim2.new(0, 10, 0, 8)
+title.BackgroundTransparency = 1
+title.Text = "🛰 Loot Teleport"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Nút Start
+local startBtn = Instance.new("TextButton", frame)
+startBtn.Size = UDim2.new(0, 120, 0, 36)
+startBtn.Position = UDim2.new(0, 12, 1, -46)
+startBtn.BackgroundColor3 = Color3.fromRGB(60,130,255)
+startBtn.Text = "Start"
+startBtn.TextColor3 = Color3.new(1,1,1)
+startBtn.Font = Enum.Font.SourceSansSemibold
+startBtn.TextSize = 18
+Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0,10)
+
+-- ==========================
+--  CORE TP LOGIC
+-- ==========================
+
+local Players = game:GetService("Players")
+local p = Players.LocalPlayer
+local char = p.Character or p.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
+
+local SPEED = 32
+local HEIGHT = 30
+
+local function FixFreeze()
+	task.wait(0.05)
+	pcall(function()
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		hrp.AssemblyAngularVelocity = Vector3.zero
+		hum.PlatformStand = false
+		hum:ChangeState(Enum.HumanoidStateType.Running)
+	end)
+end
+
+-- TP mượt bằng Velocity
+local function SmoothMove(target, keepY)
+	while true do
+		local cur = hrp.Position
+		local tpos = Vector3.new(target.X, (keepY and cur.Y or target.Y), target.Z)
+		local dir = (tpos - cur)
+		local dist = dir.Magnitude
+		if dist < 2 then break end
+		local vel = dir.Unit * SPEED
+		hrp.AssemblyLinearVelocity = vel
+		task.wait()
+	end
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	FixFreeze()
+end
+
+-- Tìm loot gần nhất
+local function findLoot()
+	local nearest, dist = nil, 999999
+	for _, obj in ipairs(game:GetDescendants()) do
+		if obj.Name == "Loot" then
+			local part = obj:FindFirstChildWhichIsA("BasePart", true)
+			if part then
+				local d = (part.Position - hrp.Position).Magnitude
+				if d < dist then
+					dist = d
+					nearest = part
+				end
+			end
+		end
+	end
+	return nearest
+end
+
+-- Tìm ProximityPrompt
+local function findPrompt(obj)
+	if not obj then return nil end
+	for _, v in ipairs(obj:GetDescendants()) do
+		if v:IsA("ProximityPrompt") then return v end
+	end
+	return nil
+end
+
+-- Bấm E nhặt
+local function firePrompt(pr)
+	if not pr then return end
+	pcall(function() fireproximityprompt(pr) end)
+	pcall(function()
+		pr:InputHoldBegin()
+		task.wait(0.1)
+		pr:InputHoldEnd()
+	end)
+end
+
+-- Chạy 1 vòng
+local function RunOne()
+	local loot = findLoot()
+	if not loot then warn("Không tìm thấy loot!") return end
+
+	local old = hrp.CFrame
+
+	-- 1) TP mượt lên cao
+	local up = hrp.Position + Vector3.new(0, HEIGHT, 0)
+	SmoothMove(up, false)
+
+	-- 2) TP mượt ngang giữ Y
+	local above = Vector3.new(loot.Position.X, up.Y, loot.Position.Z)
+	SmoothMove(above, true)
+
+	-- 3) TP nhanh xuống loot
+	hrp.CFrame = CFrame.new(loot.Position + Vector3.new(0,2,0))
+	FixFreeze()
+	task.wait(0.15)
+
+	-- 4) Nhặt
+	firePrompt(findPrompt(loot))
+	task.wait(0.3)
+
+	-- 5) TP nhanh lên lại
+	hrp.CFrame = CFrame.new(above)
+	FixFreeze()
+
+	-- 6) TP mượt về vị trí cũ
+	SmoothMove(old.Position, false)
+	hrp.CFrame = old
+	FixFreeze()
+end
+
+-- ===============
+-- Start
+-- ===============
+
+startBtn.MouseButton1Click:Connect(function()
+	RunOne()
+end)
+
+print("LootTP Loaded OK")
