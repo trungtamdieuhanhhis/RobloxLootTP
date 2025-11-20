@@ -1,0 +1,162 @@
+-- loot.lua (TP mượt + TP xuyên vật cản xuống loot đúng yêu cầu)
+local parent = (gethui and gethui()) or game:GetService("CoreGui")
+
+local old = parent:FindFirstChild("Loot_UI")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "Loot_UI"
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Parent = parent
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 300, 0, 110)
+frame.Position = UDim2.new(0, 120, 0, 120)
+frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+frame.Active = true
+frame.Draggable = true
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+local title = Instance.new("TextLabel", frame)
+title.Position = UDim2.new(0, 10, 0, 8)
+title.Size = UDim2.new(1, -20, 0, 26)
+title.BackgroundTransparency = 1
+title.Text = "🛰 Loot Teleport"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+local startBtn = Instance.new("TextButton", frame)
+startBtn.Size = UDim2.new(0, 120, 0, 36)
+startBtn.Position = UDim2.new(0, 12, 1, -46)
+startBtn.BackgroundColor3 = Color3.fromRGB(60,130,255)
+startBtn.Text = "Start"
+startBtn.TextColor3 = Color3.new(1,1,1)
+startBtn.Font = Enum.Font.SourceSansSemibold
+startBtn.TextSize = 18
+Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0,10)
+
+
+
+-- ==========================
+-- CORE
+-- ==========================
+
+local Players = game:GetService("Players")
+local p = Players.LocalPlayer
+local char = p.Character or p.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
+
+local SPEED = 40
+local HEIGHT = 30
+
+local function FixFreeze()
+	task.wait(0.05)
+	pcall(function()
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		hrp.AssemblyAngularVelocity = Vector3.zero
+		hum.PlatformStand = false
+		hum:ChangeState(Enum.HumanoidStateType.Running)
+	end)
+end
+
+-- TP mượt ngang, KHÓA Y
+local function SmoothHorizontal(targetXZ, fixedY)
+	while true do
+		if not hrp then break end
+		local cur = hrp.Position
+		local tpos = Vector3.new(targetXZ.X, fixedY, targetXZ.Z)
+		local dir = (tpos - cur)
+		local dist = dir.Magnitude
+
+		if dist < 2 then break end
+
+		hrp.AssemblyLinearVelocity = dir.Unit * SPEED
+		task.wait()
+	end
+
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	FixFreeze()
+end
+
+-- tìm loot gần nhất
+local function findLoot()
+	local nearest, dist = nil, 999999
+	for _, obj in ipairs(game:GetDescendants()) do
+		if obj.Name == "Loot" then
+			local part = obj:FindFirstChildWhichIsA("BasePart", true)
+			if part then
+				local d = (part.Position - hrp.Position).Magnitude
+				if d < dist then
+					dist = d
+					nearest = part
+				end
+			end
+		end
+	end
+	return nearest
+end
+
+-- user đã nhặt?
+local function HasItem()
+	if p.Character:FindFirstChildWhichIsA("Tool") then return true end
+	if p.Backpack:FindFirstChildWhichIsA("Tool") then return true end
+	return false
+end
+
+
+-- ==========================
+--  RUN ONE (chạy 1 vòng)
+-- ==========================
+
+local function RunOne()
+	local loot = findLoot()
+	if not loot then warn("Không tìm loot!") return end
+
+	local oldCF = hrp.CFrame
+
+	-- 1) TP mượt lên cao
+	local upY = hrp.Position.Y + HEIGHT
+	SmoothHorizontal(Vector3.new(hrp.Position.X, 0, hrp.Position.Z), upY)
+
+	-- 2) TP mượt ngang đến trên loot (giữ Y)
+	local aboveXZ = Vector3.new(loot.Position.X, 0, loot.Position.Z)
+	SmoothHorizontal(aboveXZ, upY)
+
+
+	-- 3) TP XUYÊN VẬT CẢN xuống cạnh loot
+	-- chỉ thay đổi Y → không đổi X/Z
+	local dropPos = Vector3.new(hrp.Position.X, loot.Position.Y + 2, hrp.Position.Z)
+
+	hrp.CFrame = CFrame.new(dropPos)
+	FixFreeze()
+
+	-- 4) chờ user nhấn E (tức item vào tay)
+	local timeout = 10
+	while timeout > 0 do
+		if HasItem() then break end
+		timeout -= task.wait(0.1)
+	end
+
+	-- 5) TP nhanh lên lại
+	local upAgain = Vector3.new(hrp.Position.X, upY, hrp.Position.Z)
+	hrp.CFrame = CFrame.new(upAgain)
+	FixFreeze()
+
+	-- 6) TP mượt về vị trí ban đầu
+	local oldXZ = Vector3.new(oldCF.X, 0, oldCF.Z)
+	SmoothHorizontal(oldXZ, upY)
+
+	hrp.CFrame = oldCF
+	FixFreeze()
+end
+
+
+startBtn.MouseButton1Click:Connect(function()
+	RunOne()
+end)
+
+print("LootTP Loaded OK")
