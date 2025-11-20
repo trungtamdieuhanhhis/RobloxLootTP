@@ -1,3 +1,11 @@
+local cg = (gethui and gethui()) or game:GetService("CoreGui")
+for _, ui in ipairs(cg:GetChildren()) do
+	if ui.Name:match("^Loot_") then
+		ui:Destroy()
+	end
+end
+
+
 -------------------------------
 -- LootTP FINAL Version 🚀
 -- UI + TP mượt + NoClip + Stop + ESP + Rarity Color + Icon + No Cave Loot + Space Boost
