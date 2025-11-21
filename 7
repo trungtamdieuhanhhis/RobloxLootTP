@@ -1,0 +1,356 @@
+local cg = (gethui and gethui()) or game:GetService("CoreGui")
+for _, ui in ipairs(cg:GetChildren()) do
+    if ui.Name:match("^Loot_") then
+        ui:Destroy()
+    end
+end
+
+
+-------------------------------
+-- LootTP FINAL Version 🚀 (FIX SHOW MORE LOOT)
+-------------------------------
+
+local parent = (gethui and gethui()) or game:GetService("CoreGui")
+local old = parent:FindFirstChild("Loot_UI")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "Loot_UI"
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Parent = parent
+
+----------------------------------------------------
+-- UI
+----------------------------------------------------
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 340, 0, 300)
+frame.Position = UDim2.new(0, 120, 0, 100)
+frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+frame.Active = true
+frame.Draggable = true
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+local title = Instance.new("TextLabel", frame)
+title.Position = UDim2.new(0, 10, 0, 8)
+title.Size = UDim2.new(1, -20, 0, 26)
+title.BackgroundTransparency = 1
+title.Text = "🛰 Loot Teleport"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+local startBtn = Instance.new("TextButton", frame)
+startBtn.Size = UDim2.new(0, 120, 0, 34)
+startBtn.Position = UDim2.new(0, 12, 0, 50)
+startBtn.BackgroundColor3 = Color3.fromRGB(60,130,255)
+startBtn.Text = "Start"
+startBtn.TextColor3 = Color3.new(1,1,1)
+startBtn.Font = Enum.Font.SourceSansSemibold
+startBtn.TextSize = 16
+Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0,10)
+
+local stopBtn = Instance.new("TextButton", frame)
+stopBtn.Size = UDim2.new(0, 120, 0, 34)
+stopBtn.Position = UDim2.new(0, 12, 0, 90)
+stopBtn.BackgroundColor3 = Color3.fromRGB(200,60,60)
+stopBtn.Text = "Stop"
+stopBtn.TextColor3 = Color3.new(1,1,1)
+stopBtn.Font = Enum.Font.SourceSansSemibold
+stopBtn.TextSize = 16
+Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0,10)
+
+local showLoot = Instance.new("TextButton", frame)
+showLoot.Size = UDim2.new(0, 150, 0, 28)
+showLoot.Position = UDim2.new(0, 12, 0, 140)
+showLoot.BackgroundColor3 = Color3.fromRGB(40,40,40)
+showLoot.Text = "☐ Show Loot ESP"
+showLoot.TextColor3 = Color3.fromRGB(230,230,230)
+showLoot.Font = Enum.Font.SourceSans
+showLoot.TextSize = 16
+Instance.new("UICorner", showLoot).CornerRadius = UDim.new(0,8)
+
+_G.LOOTTP_SHOWLOOT = false
+_G.LOOTTP_JOB = nil
+
+
+----------------------------------------------------
+-- CORE
+----------------------------------------------------
+
+local Players = game:GetService("Players")
+local p = Players.LocalPlayer
+local char = p.Character or p.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
+local UIS = game:GetService("UserInputService")
+
+local SPEED = 60
+local HEIGHT = 30
+
+
+-----------------------------------------
+-- FIXED: IsInCave CHUẨN
+-- Chỉ coi là trong hang nếu phía trên bị che bởi đất/đá (Blacklist player + item)
+-----------------------------------------
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+rayParams.FilterDescendantsInstances = {char}
+
+local function IsInCave(item)
+    local origin = item.Position
+    local direction = Vector3.new(0, 300, 0)
+
+    local result = workspace:Raycast(origin, direction, rayParams)
+    if not result then
+        return false    -- Không đụng gì → ngoài trời
+    end
+
+    local mat = result.Material.Name:lower()
+    if mat:find("rock") or mat:find("ground") or mat:find("grass") then
+        return true
+    end
+
+    return false
+end
+
+
+local function FixFreeze()
+    task.wait(0.05)
+    pcall(function()
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        hum.PlatformStand = false
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end)
+end
+
+local function SetNoClip(state)
+    for _,v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.CanCollide = not state
+        end
+    end
+end
+
+
+----------------------------------------------------
+-- FIXED FIND LOOT (NHIỀU NHẤT)
+-- Không dựa vào tên "Loot" nữa
+-- Bắt Model có BasePart + không phải player + không phải item rác
+----------------------------------------------------
+
+local function isLootModel(m)
+    if not m:IsA("Model") then return false end
+    if m:FindFirstChildWhichIsA("Humanoid") then return false end
+    if m:FindFirstChild("HumanoidRootPart") then return false end
+
+    return m:FindFirstChildWhichIsA("BasePart", true) ~= nil
+end
+
+local function findAllLoot()
+    local result = {}
+    for _, m in ipairs(workspace:GetChildren()) do
+        if isLootModel(m) then
+            local part = m:FindFirstChildWhichIsA("BasePart", true)
+            if part and not IsInCave(part) then
+                table.insert(result, part)
+            end
+        end
+    end
+    return result
+end
+
+local function findLoot()
+    local nearest, dist = nil, 999999
+    for _, m in ipairs(workspace:GetChildren()) do
+        if isLootModel(m) then
+            local part = m:FindFirstChildWhichIsA("BasePart", true)
+            if part and not IsInCave(part) then
+                local d = (part.Position - hrp.Position).Magnitude
+                if d < dist then
+                    dist = d
+                    nearest = part
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function HasItem()
+    if p.Character:FindFirstChildWhichIsA("Tool") then return true end
+    if p.Backpack:FindFirstChildWhichIsA("Tool") then return true end
+    return false
+end
+
+
+----------------------------------------------------
+-- ESP
+----------------------------------------------------
+
+local function ClearAllESP()
+    for _,v in ipairs(workspace:GetChildren()) do
+        if v.Name == "_LOOT_ESP_" then
+            v:Destroy()
+        end
+    end
+end
+
+local function GetRarity(name)
+    name = string.lower(name)
+
+    if name:find("ancient") or name:find("myth") or name:find("legend") or name:find("skull") then
+        return Color3.fromRGB(255,220,0), "💎"
+
+    elseif name:find("emerald") or name:find("ruby") or name:find("sapp") or name:find("crystal") then
+        return Color3.fromRGB(180,0,255), "🔮"
+
+    elseif name:find("chest") or name:find("crate") or name:find("box") or name:find("gem") then
+        return Color3.fromRGB(80,180,255), "📦"
+
+    else
+        return Color3.new(1,1,1), "🔘"
+    end
+end
+
+local function AddESP(itemPart)
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "_LOOT_ESP_"
+    gui.Adornee = itemPart
+    gui.Size = UDim2.new(0, 200, 0, 50)
+    gui.StudsOffset = Vector3.new(0,2,0)
+    gui.AlwaysOnTop = true
+
+    local text = Instance.new("TextLabel", gui)
+    text.Size = UDim2.new(1,0,1,0)
+    text.BackgroundTransparency = 1
+    text.Font = Enum.Font.SourceSansBold
+    text.TextSize = 16
+    text.TextStrokeTransparency = 0.5
+
+    gui.Parent = workspace
+
+    task.spawn(function()
+        while gui.Parent do
+            local dist = math.floor((itemPart.Position - hrp.Position).Magnitude)
+            local name = itemPart.Parent and itemPart.Parent.Name or itemPart.Name
+            
+            local col, icon = GetRarity(name)
+            text.TextColor3 = col
+            text.Text = string.format("%s %s (%dm)", icon, name, dist)
+
+            task.wait(0.2)
+        end
+    end)
+end
+
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if _G.LOOTTP_SHOWLOOT then
+            ClearAllESP()
+            for _, part in ipairs(findAllLoot()) do AddESP(part) end
+        else
+            ClearAllESP()
+        end
+    end
+end)
+
+
+----------------------------------------------------
+-- TP Logic
+----------------------------------------------------
+
+local function SmoothHorizontal(targetXZ, fixedY)
+    while true do
+        if not hrp then break end
+
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then
+            fixedY += 3
+        end
+
+        local cur = hrp.Position
+        local tpos = Vector3.new(targetXZ.X, fixedY, targetXZ.Z)
+        local dir = tpos - cur
+        if dir.Magnitude < 2 then break end
+
+        hrp.AssemblyLinearVelocity = dir.Unit * SPEED
+        hrp.CFrame = CFrame.new(hrp.Position.X, fixedY, hrp.Position.Z)
+
+        task.wait()
+    end
+
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    FixFreeze()
+end
+
+
+local function RunOne()
+    local loot = findLoot()
+    if not loot then warn("Không có loot ngoài trời!") return end
+
+    local oldCF = hrp.CFrame
+    local upY = hrp.Position.Y + HEIGHT
+
+    SmoothHorizontal(Vector3.new(hrp.Position.X,0,hrp.Position.Z), upY)
+    SmoothHorizontal(Vector3.new(loot.Position.X,0,loot.Position.Z), upY)
+
+    SetNoClip(true)
+    local dropPos = Vector3.new(hrp.Position.X, loot.Position.Y + 2, hrp.Position.Z)
+    hrp.CFrame = CFrame.new(dropPos)
+    FixFreeze()
+
+    local timeout = 12
+    while timeout > 0 do
+        if HasItem() then break end
+        timeout -= task.wait(0.1)
+    end
+
+    SetNoClip(false)
+    FixFreeze()
+
+    local upAgain = Vector3.new(hrp.Position.X, upY, hrp.Position.Z)
+    hrp.CFrame = CFrame.new(upAgain)
+    FixFreeze()
+
+    SmoothHorizontal(Vector3.new(oldCF.X,0,oldCF.Z), upY)
+    hrp.CFrame = oldCF
+    FixFreeze()
+end
+
+
+----------------------------------------------------
+-- START / STOP
+----------------------------------------------------
+
+startBtn.MouseButton1Click:Connect(function()
+    if _G.LOOTTP_JOB then
+        task.cancel(_G.LOOTTP_JOB)
+        _G.LOOTTP_JOB = nil
+    end
+
+    _G.LOOTTP_JOB = task.spawn(function()
+        RunOne()
+        _G.LOOTTP_JOB = nil
+    end)
+end)
+
+stopBtn.MouseButton1Click:Connect(function()
+    if _G.LOOTTP_JOB then
+        task.cancel(_G.LOOTTP_JOB)
+        _G.LOOTTP_JOB = nil
+    end
+    SetNoClip(false)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+end)
+
+showLoot.MouseButton1Click:Connect(function()
+    _G.LOOTTP_SHOWLOOT = not _G.LOOTTP_SHOWLOOT
+    showLoot.Text = _G.LOOTTP_SHOWLOOT and "☑ Show Loot ESP" or "☐ Show Loot ESP"
+end)
+
+print("LootTP Loaded OK (FIXED VERSION)")
